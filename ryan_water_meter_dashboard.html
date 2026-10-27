@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0f766e">
+<title>Ryan Water Meter</title>
+<style>
+:root{color-scheme:light dark;--bg:#f4f7f7;--card:#fff;--text:#102a2a;--muted:#607070;--brand:#0f766e;--brand2:#14b8a6;--border:#d9e3e3;--ok:#15803d;--warn:#b45309}
+@media(prefers-color-scheme:dark){:root{--bg:#071313;--card:#102121;--text:#ecfafa;--muted:#9db3b3;--border:#294040}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.wrap{max-width:680px;margin:auto;padding:20px 16px 36px}.hero{background:linear-gradient(135deg,var(--brand),#115e59);color:#fff;border-radius:22px;padding:22px;box-shadow:0 10px 30px #0002}.hero h1{margin:0;font-size:28px}.hero p{margin:6px 0 0;opacity:.88}.status{display:flex;gap:8px;align-items:center;margin-top:16px;font-weight:700}.dot{width:11px;height:11px;border-radius:50%;background:#f59e0b}.dot.on{background:#4ade80}.actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:16px 0}.actions button{min-height:50px;border:0;border-radius:14px;font-size:16px;font-weight:800;padding:12px;cursor:pointer}.primary{background:var(--brand2);color:#05201d}.secondary{background:var(--card);color:var(--text);border:1px solid var(--border)!important}.secondary:disabled{opacity:.45}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.card{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:16px;min-height:122px}.card.wide{grid-column:1/-1}.label{color:var(--muted);font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.06em}.value{font-size:29px;font-weight:900;margin-top:10px}.dates{color:var(--muted);font-size:13px;margin-top:5px;line-height:1.35}.csvbox{margin-top:14px;background:var(--card);border:1px solid var(--border);border-radius:18px;padding:16px}.csvhead{display:flex;justify-content:space-between;gap:10px;align-items:center}.csvhead h2{font-size:18px;margin:0}.small{font-size:13px;color:var(--muted)}#message{min-height:22px;margin:12px 2px;color:var(--muted);font-weight:650}.error{color:#dc2626!important}.success{color:var(--ok)!important}.steps{margin-top:14px;color:var(--muted);font-size:13px;line-height:1.55}.steps strong{color:var(--text)}@media(max-width:430px){.grid{grid-template-columns:1fr}.card.wide{grid-column:auto}.actions{grid-template-columns:1fr}.hero h1{font-size:25px}}
+</style>
+</head>
+<body><main class="wrap">
+<section class="hero"><h1>Ryan Water Meter</h1><p>Bluetooth water-use dashboard</p><div class="status"><span id="dot" class="dot"></span><span id="status">Not connected</span></div></section>
+<div class="actions"><button id="connect" class="primary">Connect to Meter</button><button id="refresh" class="secondary" disabled>Refresh Totals</button></div>
+<section class="grid">
+<div class="card"><div class="label">Today</div><div id="today" class="value">--</div><div id="todayDates" class="dates">--</div></div>
+<div class="card"><div class="label">This Week</div><div id="week" class="value">--</div><div id="weekDates" class="dates">Sunday through Saturday</div></div>
+<div class="card"><div class="label">This Month</div><div id="month" class="value">--</div><div id="monthDates" class="dates">--</div></div>
+<div class="card"><div class="label">Last Month</div><div id="lastMonth" class="value">--</div><div id="lastMonthDates" class="dates">--</div></div>
+<div class="card"><div class="label">This Year</div><div id="year" class="value">--</div><div id="yearDates" class="dates">--</div></div>
+<div class="card"><div class="label">Lifetime</div><div id="lifetime" class="value">--</div><div id="lifetimeDates" class="dates">--</div></div>
+</section>
+<section class="csvbox"><div class="csvhead"><div><h2>Daily History</h2><div id="historyCount" class="small">0 completed days saved</div></div><button id="download" class="primary" disabled>Download CSV</button></div><div class="steps"><strong>Export:</strong> Tap Download CSV. The dashboard requests all saved daily rows plus today, then opens the iPhone share sheet or downloads <strong>Ryan_Water_Meter.csv</strong>.</div></section>
+<div id="message" aria-live="polite"></div>
+</main>
+<script>
+(()=>{
+const SERVICE='9f441000-34f4-44ad-9e6f-4e14d6207891';
+const DATA='9f441001-34f4-44ad-9e6f-4e14d6207891';
+const CSV='9f441002-34f4-44ad-9e6f-4e14d6207891';
+const CMD='9f441003-34f4-44ad-9e6f-4e14d6207891';
+let device,server,dataChar,csvChar,cmdChar,csvLines=[],csvResolve,csvReject,csvTimer;
+const $=id=>document.getElementById(id); const dec=new TextDecoder(); const enc=new TextEncoder();
+function msg(t,kind=''){ $('message').textContent=t; $('message').className=kind; }
+function connected(on){$('dot').classList.toggle('on',on);$('status').textContent=on?'Connected':'Not connected';$('refresh').disabled=!on;$('download').disabled=!on;$('connect').textContent=on?'Reconnect':'Connect to Meter';}
+function gal(v){return `${Number(v||0).toLocaleString()} gal`;}
+function render(j){
+ if(j.today){$('today').textContent=gal(j.today.gallons);$('todayDates').textContent=j.today.date||'--';}
+ if(j.this_week){$('week').textContent=gal(j.this_week.gallons);$('weekDates').textContent=`${j.this_week.start} to ${j.this_week.end}`;}
+ if(j.this_month){$('month').textContent=gal(j.this_month.gallons);$('monthDates').textContent=j.this_month.month||'--';}
+ if(j.last_month){$('lastMonth').textContent=gal(j.last_month.gallons);$('lastMonthDates').textContent=`${j.last_month.start} to ${j.last_month.end}`;}
+ if(j.this_year){$('year').textContent=gal(j.this_year.gallons);$('yearDates').textContent=`${j.this_year.start} to ${j.this_year.end}`;}
+ if(j.lifetime){$('lifetime').textContent=gal(j.lifetime.gallons);$('lifetimeDates').textContent=`Since ${j.lifetime.start}`;}
+ $('historyCount').textContent=`${Number(j.history_days||0)} completed days saved`;
+}
+async function refresh(){try{const v=await dataChar.readValue();const text=dec.decode(v);render(JSON.parse(text));msg('Totals updated.','success');}catch(e){msg(`Could not read totals: ${e.message}`,'error');}}
+function onDisconnect(){connected(false);msg('Meter disconnected.');}
+async function connect(){
+ try{
+  if(!navigator.bluetooth)throw new Error('Open this page in Bluefy. Web Bluetooth is not available here.');
+  msg('Choose Ryan Water Meter...');
+  device=await navigator.bluetooth.requestDevice({filters:[{name:'Ryan Water Meter'}],optionalServices:[SERVICE]});
+  device.addEventListener('gattserverdisconnected',onDisconnect);
+  server=await device.gatt.connect(); const svc=await server.getPrimaryService(SERVICE);
+  [dataChar,csvChar,cmdChar]=await Promise.all([svc.getCharacteristic(DATA),svc.getCharacteristic(CSV),svc.getCharacteristic(CMD)]);
+  await csvChar.startNotifications(); csvChar.addEventListener('characteristicvaluechanged',onCsv);
+  connected(true); await refresh(); msg('Connected and ready.','success');
+ }catch(e){connected(false);msg(e.message,'error');}
+}
+function onCsv(ev){
+ const text=dec.decode(ev.target.value).replace(/\0/g,'');
+ if(text.trim()==='END'){
+  clearTimeout(csvTimer); const rows=csvLines.join('').replace(/\r/g,'').split('\n').filter(Boolean);
+  if(csvResolve){csvResolve(rows);csvResolve=null;csvReject=null;} return;
+ }
+ csvLines.push(text);
+}
+async function requestCsv(){
+ csvLines=[];
+ return new Promise(async(resolve,reject)=>{
+  csvResolve=resolve;csvReject=reject;
+  csvTimer=setTimeout(()=>{csvResolve=null;reject(new Error('CSV transfer timed out. Stay close to the meter and try again.'));},15000);
+  try{await cmdChar.writeValueWithResponse(enc.encode('CSV'));}catch(e){clearTimeout(csvTimer);csvResolve=null;reject(e);}
+ });
+}
+function cleanCsv(rows){
+ const out=[]; let header=false;
+ for(const r of rows){const s=r.trim();if(!s||s==='END')continue;if(s==='Date,Daily Gallons'){if(!header){out.push(s);header=true;}continue;}if(/^\d{2}\/\d{2}\/\d{4},\d+$/.test(s))out.push(s);}
+ if(!header)out.unshift('Date,Daily Gallons'); return out.join('\r\n')+'\r\n';
+}
+async function saveFile(text){
+ const file=new File([text],'Ryan_Water_Meter.csv',{type:'text/csv'});
+ if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({title:'Ryan Water Meter',files:[file]});return 'Share sheet opened.';}
+ const url=URL.createObjectURL(file);const a=document.createElement('a');a.href=url;a.download=file.name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);return 'CSV downloaded.';
+}
+async function download(){try{$('download').disabled=true;msg('Requesting daily history...');const rows=await requestCsv();const csv=cleanCsv(rows);if(csv.split('\n').filter(Boolean).length<2)throw new Error('No dated rows were received.');const result=await saveFile(csv);msg(result,'success');}catch(e){msg(e.message,'error');}finally{$('download').disabled=!server?.connected;}}
+$('connect').addEventListener('click',connect);$('refresh').addEventListener('click',refresh);$('download').addEventListener('click',download);connected(false);
+})();
+</script></body></html>
